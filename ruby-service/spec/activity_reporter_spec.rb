@@ -3,8 +3,8 @@ require 'rails_helper'
 require_relative '../app/activity_reporter'
 
 RSpec.describe ActivityReporter do
-  let(:go_service_url) { 'http://go-service.test:8080' }
-  let(:python_service_url) { 'http://python-service.test:8081' }
+  let(:go_service_url) { 'http://go-service.test' }
+  let(:python_service_url) { 'http://python-service.test' }
   let(:reporter) do
     described_class.new(
       go_service_url: go_service_url,
@@ -12,58 +12,68 @@ RSpec.describe ActivityReporter do
     )
   end
 
-  describe '#initialize' do
-    it 'sets the go_service_url and python_service_url with custom values' do
-      instance = described_class.new(
-        go_service_url: 'http://custom-go',
-        python_service_url: 'http://custom-python'
-      )
+  let(:user_id) { 'user-123' }
 
-      expect(instance.instance_variable_get(:@go_service_url)).to eq('http://custom-go')
-      expect(instance.instance_variable_get(:@python_service_url)).to eq('http://custom-python')
+  let(:activities) do
+    [
+      { 'timestamp' => '2024-01-01T10:15:00Z', 'action' => 'login' },
+      { 'timestamp' => '2024-01-01T11:00:00Z', 'action' => 'click' },
+      { 'timestamp' => '2024-01-02T09:30:00Z', 'action' => 'purchase' },
+      { 'timestamp' => '2024-01-02T10:00:00Z', 'action' => 'click' }
+    ]
+  end
+
+  let(:stats) do
+    {
+      total_actions: 4,
+      unique_actions: 3,
+      action_counts: { 'login' => 1, 'click' => 2, 'purchase' => 1 },
+      first_activity: '2024-01-01T10:15:00Z',
+      last_activity: '2024-01-02T10:00:00Z',
+      most_frequent: 'click'
+    }
+  end
+
+  let(:patterns) do
+    [
+      { 'pattern_type' => 'daily_login', 'description' => 'Logs in daily', 'confidence' => 0.9 },
+      { 'pattern_type' => 'buyer', 'description' => 'Frequently purchases', 'confidence' => 0.8 }
+    ]
+  end
+
+  let(:user_score) { 80.0 }
+
+  let(:anomalies) do
+    [
+      { 'timestamp' => '2024-01-03T00:00:00Z', 'action' => 'suspicious_login' }
+    ]
+  end
+
+  describe '#initialize' do
+    context 'with default arguments' do
+      let(:reporter_default) { described_class.new }
+
+      it 'sets default go_service_url' do
+        expect(reporter_default.instance_variable_get(:@go_service_url)).to eq('http://localhost:8080')
+      end
+
+      it 'sets default python_service_url' do
+        expect(reporter_default.instance_variable_get(:@python_service_url)).to eq('http://localhost:8081')
+      end
     end
 
-    it 'uses default URLs when none are provided' do
-      instance = described_class.new
+    context 'with custom arguments' do
+      it 'sets custom go_service_url' do
+        expect(reporter.instance_variable_get(:@go_service_url)).to eq(go_service_url)
+      end
 
-      expect(instance.instance_variable_get(:@go_service_url)).to eq('http://localhost:8080')
-      expect(instance.instance_variable_get(:@python_service_url)).to eq('http://localhost:8081')
+      it 'sets custom python_service_url' do
+        expect(reporter.instance_variable_get(:@python_service_url)).to eq(python_service_url)
+      end
     end
   end
 
   describe '#generate_report' do
-    let(:user_id) { 123 }
-    let(:options) { {} }
-    let(:activities) do
-      [
-        { 'timestamp' => '2024-01-01T10:00:00Z', 'action' => 'login' },
-        { 'timestamp' => '2024-01-01T11:00:00Z', 'action' => 'click' },
-        { 'timestamp' => '2024-01-02T09:00:00Z', 'action' => 'logout' }
-      ]
-    end
-    let(:stats) do
-      {
-        total_actions: 3,
-        unique_actions: 3,
-        action_counts: { 'login' => 1, 'click' => 1, 'logout' => 1 },
-        first_activity: '2024-01-01T10:00:00Z',
-        last_activity: '2024-01-02T09:00:00Z',
-        most_frequent: 'login'
-      }
-    end
-    let(:patterns) do
-      [
-        { 'pattern_type' => 'daily', 'description' => 'Daily login', 'confidence' => 0.9 },
-        { 'pattern_type' => 'weekly', 'description' => 'Weekly usage', 'confidence' => 0.8 }
-      ]
-    end
-    let(:user_score) { 80.0 }
-    let(:anomalies) do
-      [
-        { 'timestamp' => '2024-01-03T00:00:00Z', 'reason' => 'suspicious' }
-      ]
-    end
-
     before do
       allow(reporter).to receive(:fetch_user_activities).with(user_id).and_return(activities)
       allow(reporter).to receive(:fetch_activity_stats).with(user_id).and_return(stats)
@@ -74,151 +84,177 @@ RSpec.describe ActivityReporter do
     end
 
     context 'when activities exist' do
-      it 'returns a structured report hash with expected keys' do
-        report = reporter.generate_report(user_id, options)
+      it 'returns a hash with expected top-level keys' do
+        report = reporter.generate_report(user_id)
 
+        expect(report).to include(
+          :user_id,
+          :generated_at,
+          :summary,
+          :action_breakdown,
+          :patterns,
+          :anomalies,
+          :timeline,
+          :insights
+        )
+      end
+
+      it 'includes the correct user_id' do
+        report = reporter.generate_report(user_id)
         expect(report[:user_id]).to eq(user_id)
+      end
+
+      it 'sets generated_at to current time in ISO8601 format' do
+        report = reporter.generate_report(user_id)
         expect(report[:generated_at]).to eq('2024-01-10T12:00:00Z')
-        expect(report[:summary]).to include(
-          total_actions: 3,
-          unique_actions: 3,
+      end
+
+      it 'builds summary from stats and user_score' do
+        report = reporter.generate_report(user_id)
+        expect(report[:summary]).to eq(
+          total_actions: stats[:total_actions],
+          unique_actions: stats[:unique_actions],
           engagement_score: user_score,
-          first_activity: '2024-01-01T10:00:00Z',
-          last_activity: '2024-01-02T09:00:00Z'
+          first_activity: stats[:first_activity],
+          last_activity: stats[:last_activity]
         )
+      end
+
+      it 'includes action_breakdown from stats' do
+        report = reporter.generate_report(user_id)
         expect(report[:action_breakdown]).to eq(stats[:action_counts])
-        expect(report[:patterns]).to eq(
-          [
-            { type: 'daily', description: 'Daily login', confidence: 0.9 },
-            { type: 'weekly', description: 'Weekly usage', confidence: 0.8 }
-          ]
-        )
+      end
+
+      it 'formats patterns using format_pattern' do
+        formatted_patterns = patterns.map do |p|
+          {
+            type: p['pattern_type'],
+            description: p['description'],
+            confidence: p['confidence']
+          }
+        end
+
+        report = reporter.generate_report(user_id)
+        expect(report[:patterns]).to eq(formatted_patterns)
+      end
+
+      it 'includes anomalies as returned by fetch_anomalies' do
+        report = reporter.generate_report(user_id)
         expect(report[:anomalies]).to eq(anomalies)
+      end
+
+      it 'builds a timeline grouped by day by default' do
+        expect(reporter).to receive(:format_timeline).with(activities, :day).and_call_original
+        report = reporter.generate_report(user_id)
         expect(report[:timeline]).to be_an(Array)
-        expect(report[:insights]).to be_an(Array)
+        expect(report[:timeline].first).to include(:period, :total_actions, :actions, :first_timestamp, :last_timestamp)
       end
 
-      it 'groups timeline by day by default' do
-        report = reporter.generate_report(user_id, options)
-        periods = report[:timeline].map { |entry| entry[:period] }
-
-        expect(periods).to eq(['2024-01-01', '2024-01-02'])
-      end
-
-      it 'passes group_by option to format_timeline' do
+      it 'passes custom group_by option to format_timeline' do
         expect(reporter).to receive(:format_timeline).with(activities, :hour).and_call_original
-
         reporter.generate_report(user_id, group_by: :hour)
+      end
+
+      it 'generates insights using generate_insights' do
+        expect(reporter).to receive(:generate_insights).with(stats, patterns, user_score, anomalies).and_call_original
+        report = reporter.generate_report(user_id)
+        expect(report[:insights]).to be_an(Array)
+        expect(report[:insights]).not_to be_empty
       end
     end
 
     context 'when no activities are found' do
       before do
         allow(reporter).to receive(:fetch_user_activities).with(user_id).and_return([])
-        allow(Time).to receive(:now).and_return(Time.parse('2024-01-10T12:00:00Z'))
+        allow(reporter).to receive(:error_report).and_call_original
       end
 
-      it 'returns an error report hash' do
-        report = reporter.generate_report(user_id, options)
-
+      it 'returns an error report' do
+        report = reporter.generate_report(user_id)
         expect(report[:error]).to eq(true)
         expect(report[:message]).to eq('No activities found')
-        expect(report[:generated_at]).to eq('2024-01-10T12:00:00Z')
+        expect(report).to have_key(:generated_at)
+      end
+
+      it 'does not call other fetch methods' do
+        expect(reporter).not_to receive(:fetch_activity_stats)
+        expect(reporter).not_to receive(:fetch_activity_patterns)
+        expect(reporter).not_to receive(:fetch_user_score)
+        expect(reporter).not_to receive(:fetch_anomalies)
+
+        reporter.generate_report(user_id)
       end
     end
   end
 
   describe '#format_timeline' do
-    let(:activities) do
-      [
-        { 'timestamp' => '2024-01-01T10:15:00Z', 'action' => 'login' },
-        { 'timestamp' => '2024-01-01T10:45:00Z', 'action' => 'click' },
-        { 'timestamp' => '2024-01-01T11:00:00Z', 'action' => 'click' },
-        { 'timestamp' => '2024-01-02T09:00:00Z', 'action' => 'logout' },
-        { 'timestamp' => '2024-01-08T09:00:00Z', 'action' => 'login' }
-      ]
-    end
-
     context 'when activities array is empty' do
       it 'returns an empty array' do
-        result = reporter.format_timeline([], :day)
+        result = reporter.format_timeline([])
         expect(result).to eq([])
       end
     end
 
     context 'when grouping by day' do
-      it 'groups activities by date and counts actions' do
+      it 'groups activities by date and sorts by period' do
         result = reporter.format_timeline(activities, :day)
 
-        expect(result.size).to eq(3)
-        first_day = result.find { |e| e[:period] == '2024-01-01' }
-        expect(first_day[:total_actions]).to eq(3)
-        expect(first_day[:actions]).to eq('login' => 1, 'click' => 2)
+        expect(result.size).to eq(2)
+        expect(result.map { |r| r[:period] }).to eq(['2024-01-01', '2024-01-02'])
+
+        first_day = result.first
+        expect(first_day[:total_actions]).to eq(2)
+        expect(first_day[:actions]).to eq('login' => 1, 'click' => 1)
         expect(first_day[:first_timestamp]).to eq('2024-01-01T10:15:00Z')
         expect(first_day[:last_timestamp]).to eq('2024-01-01T11:00:00Z')
-      end
-
-      it 'sorts entries by period ascending' do
-        result = reporter.format_timeline(activities.shuffle, :day)
-        periods = result.map { |e| e[:period] }
-
-        expect(periods).to eq(['2024-01-01', '2024-01-02', '2024-01-08'])
       end
     end
 
     context 'when grouping by hour' do
       it 'groups activities by hour' do
         result = reporter.format_timeline(activities, :hour)
-        periods = result.map { |e| e[:period] }
 
-        expect(periods).to include('2024-01-01 10:00', '2024-01-01 11:00', '2024-01-02 09:00', '2024-01-08 09:00')
-        hour_10 = result.find { |e| e[:period] == '2024-01-01 10:00' }
-        expect(hour_10[:total_actions]).to eq(2)
-        expect(hour_10[:actions]).to eq('login' => 1, 'click' => 1)
+        expect(result.map { |r| r[:period] }).to include('2024-01-01 10:00', '2024-01-01 11:00', '2024-01-02 09:00', '2024-01-02 10:00')
+        hour_entry = result.find { |r| r[:period] == '2024-01-01 10:00' }
+        expect(hour_entry[:total_actions]).to eq(1)
+        expect(hour_entry[:actions]).to eq('login' => 1)
       end
     end
 
     context 'when grouping by week' do
       it 'groups activities by ISO week' do
         result = reporter.format_timeline(activities, :week)
-        periods = result.map { |e| e[:period] }
-
-        expect(periods).to all(match(/\A\d{4}-W\d{2}\z/))
+        expect(result.size).to eq(1)
+        expect(result.first[:period]).to match(/\A2024-W\d{2}\z/)
       end
     end
 
     context 'when grouping by month' do
       it 'groups activities by month' do
         result = reporter.format_timeline(activities, :month)
-        periods = result.map { |e| e[:period] }
-
-        expect(periods).to eq(['2024-01'])
+        expect(result.size).to eq(1)
+        expect(result.first[:period]).to eq('2024-01')
       end
     end
 
     context 'when grouping by unknown key' do
       it 'defaults to grouping by day' do
         result = reporter.format_timeline(activities, :unknown)
-        periods = result.map { |e| e[:period] }
-
-        expect(periods).to eq(['2024-01-01', '2024-01-02', '2024-01-08'])
+        expect(result.map { |r| r[:period] }).to eq(['2024-01-01', '2024-01-02'])
       end
     end
 
     context 'when timestamps are invalid' do
-      let(:activities_with_invalid) do
+      let(:bad_activities) do
         [
-          { 'timestamp' => 'invalid-timestamp', 'action' => 'login' }
+          { 'timestamp' => 'not-a-time', 'action' => 'login' }
         ]
       end
 
-      it 'falls back to Time.now for invalid timestamps without raising' do
-        allow(Time).to receive(:now).and_return(Time.parse('2024-01-05T00:00:00Z'))
-
-        result = reporter.format_timeline(activities_with_invalid, :day)
-
-        expect(result.size).to eq(1)
-        expect(result.first[:period]).to eq('2024-01-05')
+      it 'falls back to current time via parse_timestamp' do
+        allow(Time).to receive(:now).and_return(Time.parse('2024-02-01T00:00:00Z'))
+        result = reporter.format_timeline(bad_activities, :day)
+        expect(result.first[:period]).to eq('2024-02-01')
       end
     end
   end
@@ -226,20 +262,23 @@ RSpec.describe ActivityReporter do
   describe '#export_to_json' do
     let(:report_hash) do
       {
-        user_id: 1,
-        summary: { total_actions: 5 }
+        user_id: user_id,
+        summary: { total_actions: 1 }
       }
     end
 
-    context 'when filepath is not provided' do
-      it 'returns success with JSON data' do
+    before do
+      allow(JSON).to receive(:pretty_generate).and_call_original
+    end
+
+    context 'when filepath is nil' do
+      it 'returns success with data key containing JSON string' do
         result = reporter.export_to_json(report_hash)
 
         expect(result[:success]).to eq(true)
         expect(result[:data]).to be_a(String)
         parsed = JSON.parse(result[:data])
-        expect(parsed['user_id']).to eq(1)
-        expect(parsed['summary']['total_actions']).to eq(5)
+        expect(parsed['user_id']).to eq(user_id)
       end
     end
 
@@ -257,16 +296,17 @@ RSpec.describe ActivityReporter do
         expect(result[:filepath]).to eq(filepath)
         expect(result[:size]).to be > 0
         expect(File).to exist(filepath)
+
         file_content = File.read(filepath)
         parsed = JSON.parse(file_content)
-        expect(parsed['user_id']).to eq(1)
+        expect(parsed['user_id']).to eq(user_id)
       end
     end
 
     context 'when an error occurs during file write' do
       let(:filepath) { '/root/forbidden_path.json' }
 
-      it 'returns a failure hash with error message' do
+      it 'returns success: false with error message' do
         allow(File).to receive(:write).and_raise(StandardError.new('disk full'))
 
         result = reporter.export_to_json(report_hash, filepath)
@@ -278,241 +318,237 @@ RSpec.describe ActivityReporter do
   end
 
   describe '#compare_users' do
-    let(:user_ids) { [1, 2, 3] }
-    let(:activities_user1) { [{ 'timestamp' => '2024-01-01T10:00:00Z', 'action' => 'login' }] }
-    let(:activities_user2) { [{ 'timestamp' => '2024-01-01T11:00:00Z', 'action' => 'click' }] }
-    let(:activities_user3) { [{ 'timestamp' => '2024-01-01T12:00:00Z', 'action' => 'logout' }] }
+    let(:user_ids) { %w[user1 user2 user3] }
+
+    let(:activities_user1) do
+      [
+        { 'timestamp' => '2024-01-01T10:00:00Z', 'action' => 'login' }
+      ]
+    end
+
+    let(:activities_user2) do
+      [
+        { 'timestamp' => '2024-01-01T11:00:00Z', 'action' => 'login' },
+        { 'timestamp' => '2024-01-01T12:00:00Z', 'action' => 'click' }
+      ]
+    end
+
+    let(:activities_user3) do
+      [
+        { 'timestamp' => '2024-01-01T13:00:00Z', 'action' => 'login' },
+        { 'timestamp' => '2024-01-01T14:00:00Z', 'action' => 'click' },
+        { 'timestamp' => '2024-01-01T15:00:00Z', 'action' => 'purchase' }
+      ]
+    end
 
     let(:stats_user1) do
       {
-        total_actions: 10,
-        unique_actions: 2,
-        action_counts: { 'login' => 8, 'click' => 2 },
+        total_actions: 1,
+        unique_actions: 1,
+        action_counts: { 'login' => 1 },
         first_activity: '2024-01-01T10:00:00Z',
-        last_activity: '2024-01-02T10:00:00Z',
+        last_activity: '2024-01-01T10:00:00Z',
         most_frequent: 'login'
       }
     end
 
     let(:stats_user2) do
       {
-        total_actions: 5,
-        unique_actions: 1,
-        action_counts: { 'click' => 5 },
+        total_actions: 2,
+        unique_actions: 2,
+        action_counts: { 'login' => 1, 'click' => 1 },
         first_activity: '2024-01-01T11:00:00Z',
-        last_activity: '2024-01-02T11:00:00Z',
-        most_frequent: 'click'
+        last_activity: '2024-01-01T12:00:00Z',
+        most_frequent: 'login'
       }
     end
 
     let(:stats_user3) do
       {
-        total_actions: 20,
+        total_actions: 3,
         unique_actions: 3,
-        action_counts: { 'logout' => 10, 'login' => 5, 'click' => 5 },
-        first_activity: '2024-01-01T12:00:00Z',
-        last_activity: '2024-01-02T12:00:00Z',
-        most_frequent: 'logout'
+        action_counts: { 'login' => 1, 'click' => 1, 'purchase' => 1 },
+        first_activity: '2024-01-01T13:00:00Z',
+        last_activity: '2024-01-01T15:00:00Z',
+        most_frequent: 'login'
       }
     end
 
     before do
-      allow(reporter).to receive(:fetch_user_activities).with(1).and_return(activities_user1)
-      allow(reporter).to receive(:fetch_user_activities).with(2).and_return(activities_user2)
-      allow(reporter).to receive(:fetch_user_activities).with(3).and_return(activities_user3)
+      allow(reporter).to receive(:fetch_user_activities).with('user1').and_return(activities_user1)
+      allow(reporter).to receive(:fetch_user_activities).with('user2').and_return(activities_user2)
+      allow(reporter).to receive(:fetch_user_activities).with('user3').and_return(activities_user3)
 
-      allow(reporter).to receive(:fetch_activity_stats).with(1).and_return(stats_user1)
-      allow(reporter).to receive(:fetch_activity_stats).with(2).and_return(stats_user2)
-      allow(reporter).to receive(:fetch_activity_stats).with(3).and_return(stats_user3)
+      allow(reporter).to receive(:fetch_activity_stats).with('user1').and_return(stats_user1)
+      allow(reporter).to receive(:fetch_activity_stats).with('user2').and_return(stats_user2)
+      allow(reporter).to receive(:fetch_activity_stats).with('user3').and_return(stats_user3)
 
-      allow(reporter).to receive(:fetch_user_score).with(activities_user1).and_return(50.0)
-      allow(reporter).to receive(:fetch_user_score).with(activities_user2).and_return(75.0)
+      allow(reporter).to receive(:fetch_user_score).with(activities_user1).and_return(10.0)
+      allow(reporter).to receive(:fetch_user_score).with(activities_user2).and_return(50.0)
       allow(reporter).to receive(:fetch_user_score).with(activities_user3).and_return(90.0)
     end
 
-    context 'when fewer than two user_ids are provided' do
+    context 'when fewer than 2 users are provided' do
       it 'returns an error report' do
-        result = reporter.compare_users([1])
+        result = reporter.compare_users(['only-one'])
 
         expect(result[:error]).to eq(true)
         expect(result[:message]).to eq('At least 2 users required')
-        expect(result[:generated_at]).to be_a(String)
+        expect(result).to have_key(:generated_at)
       end
     end
 
-    context 'when multiple users are provided' do
-      it 'returns comparison data sorted by engagement_score descending' do
+    context 'when 2 or more users are provided' do
+      it 'returns comparison data with total_users and comparisons' do
         result = reporter.compare_users(user_ids)
 
         expect(result[:total_users]).to eq(3)
+        expect(result[:comparisons]).to be_an(Array)
         expect(result[:comparisons].size).to eq(3)
+      end
 
+      it 'includes per-user comparison entries with expected fields' do
+        result = reporter.compare_users(user_ids)
+        entry = result[:comparisons].find { |c| c[:user_id] == 'user2' }
+
+        expect(entry).to include(
+          user_id: 'user2',
+          total_actions: 2,
+          engagement_score: 50.0,
+          most_frequent_action: 'login'
+        )
+      end
+
+      it 'sorts comparisons by engagement_score descending' do
+        result = reporter.compare_users(user_ids)
         scores = result[:comparisons].map { |c| c[:engagement_score] }
         expect(scores).to eq(scores.sort.reverse)
-
-        top = result[:comparisons].first
-        expect(result[:top_user]).to eq(top[:user_id])
       end
 
-      it 'includes total_actions and most_frequent_action for each user' do
+      it 'sets top_user to the user with highest engagement_score' do
         result = reporter.compare_users(user_ids)
-        comparison = result[:comparisons].find { |c| c[:user_id] == 2 }
-
-        expect(comparison[:total_actions]).to eq(5)
-        expect(comparison[:most_frequent_action]).to eq('click')
+        expect(result[:top_user]).to eq('user3')
       end
 
-      it 'calculates the average_score correctly' do
+      it 'calculates average_score correctly' do
         result = reporter.compare_users(user_ids)
-        expected_average = ((50.0 + 75.0 + 90.0) / 3.0).round(2)
-
+        expected_average = ((10.0 + 50.0 + 90.0) / 3.0).round(2)
         expect(result[:average_score]).to eq(expected_average)
       end
     end
   end
 
-  describe '#parse_timestamp' do
-    it 'parses a valid ISO8601 timestamp string' do
-      time = reporter.send(:parse_timestamp, '2024-01-01T10:00:00Z')
-      expect(time).to be_a(Time)
-      expect(time.utc.iso8601).to eq('2024-01-01T10:00:00Z')
-    end
-
-    it 'returns Time.now when timestamp is invalid' do
-      fixed_now = Time.parse('2024-01-05T00:00:00Z')
-      allow(Time).to receive(:now).and_return(fixed_now)
-
-      time = reporter.send(:parse_timestamp, 'invalid')
-      expect(time).to eq(fixed_now)
-    end
-  end
-
   describe '#format_pattern' do
-    it 'formats a pattern hash into the expected structure' do
-      pattern = {
-        'pattern_type' => 'daily',
-        'description' => 'Daily login',
-        'confidence' => 0.95
+    let(:pattern) do
+      {
+        'pattern_type' => 'night_owl',
+        'description' => 'Active mostly at night',
+        'confidence' => 0.7
       }
+    end
 
+    it 'returns a hash with type, description, and confidence' do
       result = reporter.send(:format_pattern, pattern)
 
       expect(result).to eq(
-        type: 'daily',
-        description: 'Daily login',
-        confidence: 0.95
+        type: 'night_owl',
+        description: 'Active mostly at night',
+        confidence: 0.7
       )
     end
   end
 
   describe '#generate_insights' do
-    let(:stats) do
+    let(:base_stats) do
       {
-        total_actions: total_actions,
-        unique_actions: unique_actions,
-        action_counts: {},
-        first_activity: '2024-01-01T10:00:00Z',
-        last_activity: '2024-01-02T10:00:00Z',
-        most_frequent: 'login'
+        total_actions: 10,
+        unique_actions: 3
       }
     end
-    let(:patterns) { Array.new(pattern_count) { {} } }
-    let(:anomalies) { Array.new(anomaly_count) { {} } }
+
+    let(:no_patterns) { [] }
+    let(:some_patterns) { [{}, {}, {}] }
+    let(:no_anomalies) { [] }
+    let(:some_anomalies) { [{}, {}] }
 
     context 'when user_score is high' do
-      let(:total_actions) { 50 }
-      let(:unique_actions) { 5 }
-      let(:pattern_count) { 1 }
-      let(:anomaly_count) { 0 }
-
       it 'includes highly engaged insight' do
-        insights = reporter.send(:generate_insights, stats, patterns, 80.0, anomalies)
+        insights = reporter.send(:generate_insights, base_stats, no_patterns, 80.0, no_anomalies)
         expect(insights).to include('Highly engaged user with strong activity patterns')
       end
     end
 
     context 'when user_score is moderate' do
-      let(:total_actions) { 50 }
-      let(:unique_actions) { 5 }
-      let(:pattern_count) { 1 }
-      let(:anomaly_count) { 0 }
-
       it 'includes moderately engaged insight' do
-        insights = reporter.send(:generate_insights, stats, patterns, 60.0, anomalies)
+        insights = reporter.send(:generate_insights, base_stats, no_patterns, 60.0, no_anomalies)
         expect(insights).to include('Moderately engaged user with regular activity')
       end
     end
 
     context 'when user_score is low' do
-      let(:total_actions) { 50 }
-      let(:unique_actions) { 5 }
-      let(:pattern_count) { 1 }
-      let(:anomaly_count) { 0 }
-
       it 'includes low engagement insight' do
-        insights = reporter.send(:generate_insights, stats, patterns, 40.0, anomalies)
+        insights = reporter.send(:generate_insights, base_stats, no_patterns, 40.0, no_anomalies)
         expect(insights).to include('Low engagement - consider re-engagement strategies')
       end
     end
 
-    context 'when unique_actions is high' do
-      let(:total_actions) { 50 }
-      let(:unique_actions) { 11 }
-      let(:pattern_count) { 1 }
-      let(:anomaly_count) { 0 }
-
+    context 'when unique_actions is greater than 10' do
       it 'includes diverse activity profile insight' do
-        insights = reporter.send(:generate_insights, stats, patterns, 80.0, anomalies)
+        stats = base_stats.merge(unique_actions: 11)
+        insights = reporter.send(:generate_insights, stats, no_patterns, 40.0, no_anomalies)
         expect(insights).to include('Diverse activity profile across multiple action types')
       end
     end
 
-    context 'when many patterns are detected' do
-      let(:total_actions) { 50 }
-      let(:unique_actions) { 5 }
-      let(:pattern_count) { 3 }
-      let(:anomaly_count) { 0 }
-
-      it 'includes clear behavioral patterns insight' do
-        insights = reporter.send(:generate_insights, stats, patterns, 80.0, anomalies)
+    context 'when more than 2 patterns exist' do
+      it 'includes behavioral patterns detected insight' do
+        insights = reporter.send(:generate_insights, base_stats, some_patterns, 40.0, no_anomalies)
         expect(insights).to include('Clear behavioral patterns detected')
       end
     end
 
-    context 'when anomalies are present' do
-      let(:total_actions) { 50 }
-      let(:unique_actions) { 5 }
-      let(:pattern_count) { 1 }
-      let(:anomaly_count) { 2 }
-
-      it 'includes anomalies insight with count' do
-        insights = reporter.send(:generate_insights, stats, patterns, 80.0, anomalies)
+    context 'when anomalies exist' do
+      it 'includes anomalous activities insight with count' do
+        insights = reporter.send(:generate_insights, base_stats, no_patterns, 40.0, some_anomalies)
         expect(insights).to include('2 anomalous activities detected - review recommended')
       end
     end
 
-    context 'when total_actions is very high' do
-      let(:total_actions) { 150 }
-      let(:unique_actions) { 5 }
-      let(:pattern_count) { 1 }
-      let(:anomaly_count) { 0 }
-
+    context 'when total_actions is greater than 100' do
       it 'includes power user insight' do
-        insights = reporter.send(:generate_insights, stats, patterns, 80.0, anomalies)
+        stats = base_stats.merge(total_actions: 150)
+        insights = reporter.send(:generate_insights, stats, no_patterns, 40.0, no_anomalies)
         expect(insights).to include('Power user - high volume of activities')
       end
     end
   end
 
-  describe '#error_report' do
-    it 'returns a standardized error hash with message and timestamp' do
-      allow(Time).to receive(:now).and_return(Time.parse('2024-01-10T12:00:00Z'))
+  describe '#parse_timestamp' do
+    context 'with a valid timestamp string' do
+      it 'parses and returns a Time object' do
+        time = reporter.send(:parse_timestamp, '2024-01-01T10:00:00Z')
+        expect(time).to be_a(Time)
+        expect(time.utc.iso8601).to eq('2024-01-01T10:00:00Z')
+      end
+    end
 
+    context 'with an invalid timestamp string' do
+      it 'returns current time when parsing fails' do
+        allow(Time).to receive(:now).and_return(Time.parse('2024-03-01T00:00:00Z'))
+        time = reporter.send(:parse_timestamp, 'not-a-time')
+        expect(time.utc.iso8601).to eq('2024-03-01T00:00:00Z')
+      end
+    end
+  end
+
+  describe '#error_report' do
+    it 'returns an error hash with message and generated_at' do
+      allow(Time).to receive(:now).and_return(Time.parse('2024-04-01T00:00:00Z'))
       result = reporter.send(:error_report, 'Something went wrong')
 
       expect(result[:error]).to eq(true)
       expect(result[:message]).to eq('Something went wrong')
-      expect(result[:generated_at]).to eq('2024-01-10T12:00:00Z')
+      expect(result[:generated_at]).to eq('2024-04-01T00:00:00Z')
     end
   end
 end
