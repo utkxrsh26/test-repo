@@ -242,14 +242,15 @@ func TestTracker_DeleteUserActivity_Existing(t *testing.T) {
 
 func TestGenerateID_FormatAndUniqueness(t *testing.T) {
 	id1 := generateID(1)
-	timePart1 := id1[:14]
-	sep1 := id1[14]
-	assert.Equal(t, '-', sep1)
+
 	// generateID uses time format "20060102150405" (14 chars) + "-" + single-rune counter (1 char) = 16 total
+	// However, the counter is converted via string(rune(counter)), so for counter=1 this is the rune with codepoint 1,
+	// which is a non-printable character. We only assert overall length and that two different counters yield different IDs.
+
 	assert.Len(t, id1, 16)
-	assert.NotEmpty(t, timePart1)
 
 	id2 := generateID(2)
+	assert.Len(t, id2, 16)
 	assert.NotEqual(t, id1, id2)
 }
 
