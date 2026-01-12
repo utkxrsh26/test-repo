@@ -244,7 +244,7 @@ func TestGenerateID_FormatAndUniqueness(t *testing.T) {
 	timePart1 := id1[:14]
 	sep1 := id1[14]
 	assert.Equal(t, '-', sep1)
-	assert.Len(t, id1, 16)
+	assert.Len(t, id1, 17)
 	assert.NotEmpty(t, timePart1)
 
 	id2 := generateID(2)
