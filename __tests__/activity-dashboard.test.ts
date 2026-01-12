@@ -1,6 +1,18 @@
 import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals'
 import { ActivityDashboard, Activity } from '../src/activity-dashboard'
 
+// Mock external libs defensively in case implementation uses them
+jest.mock('date-fns', () => ({
+  ...jest.requireActual('date-fns'),
+  format: jest.fn((date, fmt) => '2024-01-01'),
+  subMonths: jest.fn((date, n) => new Date('2024-01-01'))
+}))
+
+jest.mock('react-use', () => ({
+  ...jest.requireActual('react-use'),
+  useMedia: jest.fn()
+}))
+
 describe('ActivityDashboard', () => {
   let activities: Activity[]
   let dashboard: ActivityDashboard
@@ -100,6 +112,30 @@ describe('ActivityDashboard', () => {
     })
   })
 
-  // Additional tests for trends and internal helpers are omitted here
-  // because the source implementation is not available in this context.
+  describe('trends and helpers', () => {
+    it('finds most frequent action for non-empty list', () => {
+      const result = dashboard.getUserSummary('user1')
+      expect(result).not.toBeNull()
+      if (!result) return
+      expect(result.mostFrequentAction).toBe('view')
+    })
+
+    it('handles empty activities when computing most frequent action', () => {
+      const emptyDashboard = new ActivityDashboard([])
+      const summary = emptyDashboard.getUserSummary('any')
+      expect(summary).toBeNull()
+    })
+
+    it('supports multiple users independently', () => {
+      const user1 = dashboard.getUserSummary('user1')
+      const user2 = dashboard.getUserSummary('user2')
+
+      expect(user1).not.toBeNull()
+      expect(user2).not.toBeNull()
+      if (!user1 || !user2) return
+
+      expect(user1.totalActions).toBe(4)
+      expect(user2.totalActions).toBe(1)
+    })
+  })
 })

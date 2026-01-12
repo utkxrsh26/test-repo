@@ -83,6 +83,7 @@ func TestTracker_GetActivityStats_NoActivity(t *testing.T) {
 	assert.Equal(t, 0, stats.UniqueActions)
 	assert.NotNil(t, stats.ActionCounts)
 	assert.Equal(t, 0, len(stats.ActionCounts))
+	// Source code leaves FirstActivity and LastActivity zero when no logs exist
 	assert.True(t, stats.FirstActivity.IsZero())
 	assert.True(t, stats.LastActivity.IsZero())
 	assert.Equal(t, "", stats.MostFrequent)
@@ -244,7 +245,8 @@ func TestGenerateID_FormatAndUniqueness(t *testing.T) {
 	timePart1 := id1[:14]
 	sep1 := id1[14]
 	assert.Equal(t, '-', sep1)
-	assert.Len(t, id1, 17)
+	// generateID uses time format "20060102150405" (14 chars) + "-" + single-rune counter (1 char) = 16 total
+	assert.Len(t, id1, 16)
 	assert.NotEmpty(t, timePart1)
 
 	id2 := generateID(2)
