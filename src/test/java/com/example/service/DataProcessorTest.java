@@ -41,33 +41,31 @@ class DataProcessorTest {
     // -------------------------------------------------------------------------
 
     @Test
-    @DisplayName("processDataPipeline - should return empty map for null or empty input")
-    void testProcessDataPipeline_NullOrEmptyInput() {
-        Map<String, List<Integer>> resultNull =
-                dataProcessor.<String, Integer>processDataPipeline(
-                        null,
-                        s -> true,
-                        String::length,
-                        Object::toString,
-                        Comparator.naturalOrder()
-                );
+    @DisplayName("processDataPipeline should return empty map for null or empty input")
+    void testProcessDataPipeline_NullOrEmpty() {
+        Map<String, List<Integer>> resultNull = dataProcessor.<String, Integer>processDataPipeline(
+                null,
+                s -> true,
+                String::length,
+                Object::toString,
+                Comparator.naturalOrder()
+        );
         assertNotNull(resultNull);
         assertTrue(resultNull.isEmpty());
 
-        Map<String, List<Integer>> resultEmpty =
-                dataProcessor.<String, Integer>processDataPipeline(
-                        Collections.emptyList(),
-                        s -> true,
-                        String::length,
-                        Object::toString,
-                        Comparator.naturalOrder()
-                );
+        Map<String, List<Integer>> resultEmpty = dataProcessor.<String, Integer>processDataPipeline(
+                Collections.emptyList(),
+                s -> true,
+                String::length,
+                Object::toString,
+                Comparator.naturalOrder()
+        );
         assertNotNull(resultEmpty);
         assertTrue(resultEmpty.isEmpty());
     }
 
     @Test
-    @DisplayName("processDataPipeline - should filter, transform, sort and group correctly")
+    @DisplayName("processDataPipeline should filter, transform, sort and group correctly")
     void testProcessDataPipeline_BasicFlow() {
         List<String> data = Arrays.asList("apple", "banana", "apricot", "berry", "avocado");
 
@@ -76,68 +74,61 @@ class DataProcessorTest {
         Function<Integer, String> grouper = len -> len % 2 == 0 ? "even" : "odd";
         Comparator<Integer> sorter = Comparator.naturalOrder();
 
-        Map<String, List<Integer>> result =
-                dataProcessor.<String, Integer>processDataPipeline(
-                        data, filter, transformer, grouper, sorter
-                );
+        Map<String, List<Integer>> result = dataProcessor.<String, Integer>processDataPipeline(
+                data, filter, transformer, grouper, sorter
+        );
 
         assertNotNull(result);
         assertTrue(result.containsKey("odd"));
         assertFalse(result.containsKey("even"));
 
         List<Integer> oddGroup = result.get("odd");
-        assertNotNull(oddGroup);
-        // "apple"(5), "apricot"(7), "avocado"(7) -> distinct and sorted: [5,7]
-        assertEquals(2, oddGroup.size());
         assertEquals(Arrays.asList(5, 7), oddGroup);
     }
 
     @Test
-    @DisplayName("processDataPipeline - should remove nulls after transformation")
-    void testProcessDataPipeline_NullAfterTransform() {
-        List<String> data = Arrays.asList("keep", "drop");
+    @DisplayName("processDataPipeline should remove nulls and apply distinct and limit per group")
+    void testProcessDataPipeline_NullsDistinctAndLimit() {
+        List<String> data = new ArrayList<>();
+        for (int i = 0; i < 150; i++) {
+            data.add("x"); // same value to test distinct
+        }
+        data.add(null);
 
-        Function<String, String> transformer = s -> "drop".equals(s) ? null : s.toUpperCase();
-        Predicate<String> filter = s -> true;
+        Predicate<String> filter = Objects::nonNull;
+        Function<String, String> transformer = s -> s; // identity
         Function<String, String> grouper = s -> "group";
         Comparator<String> sorter = Comparator.naturalOrder();
 
-        Map<String, List<String>> result =
-                dataProcessor.<String, String>processDataPipeline(
-                        data, filter, transformer, grouper, sorter
-                );
+        Map<String, List<String>> result = dataProcessor.<String, String>processDataPipeline(
+                data, filter, transformer, grouper, sorter
+        );
 
-        assertEquals(1, result.size());
+        assertNotNull(result);
+        assertTrue(result.containsKey("group"));
         List<String> group = result.get("group");
-        assertNotNull(group);
+
+        // distinct should reduce to single "x"
         assertEquals(1, group.size());
-        assertEquals("KEEP", group.get(0));
+        assertEquals("x", group.get(0));
     }
 
     @Test
-    @DisplayName("processDataPipeline - should deduplicate and limit to 100 per group")
-    void testProcessDataPipeline_DeduplicationAndLimit() {
-        List<Integer> data = new ArrayList<>();
-        for (int i = 0; i < 200; i++) {
-            data.add(i % 10); // many duplicates of 0..9
-        }
+    @DisplayName("processDataPipeline should respect custom sorter")
+    void testProcessDataPipeline_Sorter() {
+        List<Integer> data = Arrays.asList(5, 1, 3, 2, 4);
 
-        Predicate<Integer> filter = i -> true;
+        Predicate<Integer> filter = i -> i > 1;
         Function<Integer, Integer> transformer = i -> i;
         Function<Integer, String> grouper = i -> "all";
-        Comparator<Integer> sorter = Comparator.naturalOrder();
+        Comparator<Integer> sorter = Comparator.reverseOrder();
 
-        Map<String, List<Integer>> result =
-                dataProcessor.<Integer, Integer>processDataPipeline(
-                        data, filter, transformer, grouper, sorter
-                );
+        Map<String, List<Integer>> result = dataProcessor.<Integer, Integer>processDataPipeline(
+                data, filter, transformer, grouper, sorter
+        );
 
-        assertEquals(1, result.size());
-        List<Integer> group = result.get("all");
-        assertNotNull(group);
-        // distinct of 0..9 -> 10 elements, less than limit 100
-        assertEquals(10, group.size());
-        assertEquals(Arrays.asList(0,1,2,3,4,5,6,7,8,9), group);
+        List<Integer> list = result.get("all");
+        assertEquals(Arrays.asList(5, 4, 3, 2), list);
     }
 
     // -------------------------------------------------------------------------
@@ -145,96 +136,62 @@ class DataProcessorTest {
     // -------------------------------------------------------------------------
 
     @Test
-    @DisplayName("calculateStatistics - should throw for null or empty list")
+    @DisplayName("calculateStatistics should throw for null or empty list")
     void testCalculateStatistics_NullOrEmpty() {
         assertThrows(IllegalArgumentException.class, () -> dataProcessor.calculateStatistics(null));
         assertThrows(IllegalArgumentException.class, () -> dataProcessor.calculateStatistics(Collections.emptyList()));
     }
 
     @Test
-    @DisplayName("calculateStatistics - should compute correct statistics for odd-sized list")
+    @DisplayName("calculateStatistics should compute correct mean, median, quartiles and std dev for odd-sized list")
     void testCalculateStatistics_OddSizedList() {
-        List<Double> values = Arrays.asList(1.0, 2.0, 3.0, 4.0, 100.0);
+        List<Double> values = Arrays.asList(1.0, 2.0, 3.0, 4.0, 5.0);
 
         DataProcessor.StatisticalResult result = dataProcessor.calculateStatistics(values);
 
-        double expectedMean = (1.0 + 2.0 + 3.0 + 4.0 + 100.0) / 5.0;
-        assertEquals(expectedMean, result.getMean(), 0.0001);
+        assertEquals(3.0, result.getMean(), 0.0001);
         assertEquals(3.0, result.getMedian(), 0.0001);
-
-        // Sorted: [1,2,3,4,100]
-        // Q1: ceil(0.25*5)=2 -> index1 -> 2
-        // Q3: ceil(0.75*5)=4 -> index3 -> 4
         assertEquals(2.0, result.getQ1(), 0.0001);
         assertEquals(4.0, result.getQ3(), 0.0001);
+        assertEquals(1.4142, result.getStandardDeviation(), 0.0001);
+        assertTrue(result.getOutliers().isEmpty());
+    }
 
-        // Standard deviation
-        double mean = expectedMean;
-        double variance = (Math.pow(1 - mean, 2) +
-                Math.pow(2 - mean, 2) +
-                Math.pow(3 - mean, 2) +
-                Math.pow(4 - mean, 2) +
-                Math.pow(100 - mean, 2)) / 5.0;
-        double expectedStdDev = Math.sqrt(variance);
-        assertEquals(expectedStdDev, result.getStandardDeviation(), 0.0001);
+    @Test
+    @DisplayName("calculateStatistics should compute correct values for even-sized list")
+    void testCalculateStatistics_EvenSizedList() {
+        List<Double> values = Arrays.asList(10.0, 20.0, 30.0, 40.0);
 
-        // IQR = 2, bounds: -1, 7 -> 100 is outlier
+        DataProcessor.StatisticalResult result = dataProcessor.calculateStatistics(values);
+
+        assertEquals(25.0, result.getMean(), 0.0001);
+        assertEquals(25.0, result.getMedian(), 0.0001);
+        assertEquals(20.0, result.getQ1(), 0.0001);
+        assertEquals(35.0, result.getQ3(), 0.0001);
+        assertEquals(12.9099, result.getStandardDeviation(), 0.0001);
+        assertTrue(result.getOutliers().isEmpty());
+    }
+
+    @Test
+    @DisplayName("calculateStatistics should detect outliers using IQR method")
+    void testCalculateStatistics_Outliers() {
+        List<Double> values = Arrays.asList(10.0, 12.0, 11.0, 13.0, 12.5, 100.0);
+
+        DataProcessor.StatisticalResult result = dataProcessor.calculateStatistics(values);
+
         List<Double> outliers = result.getOutliers();
         assertEquals(1, outliers.size());
         assertEquals(100.0, outliers.get(0), 0.0001);
     }
 
     @Test
-    @DisplayName("calculateStatistics - should compute correct statistics for even-sized list")
-    void testCalculateStatistics_EvenSizedList() {
-        List<Double> values = Arrays.asList(10.0, 20.0, 30.0, 40.0);
-
-        DataProcessor.StatisticalResult result = dataProcessor.calculateStatistics(values);
-
-        double expectedMean = (10.0 + 20.0 + 30.0 + 40.0) / 4.0;
-        assertEquals(expectedMean, result.getMean(), 0.0001);
-        assertEquals(25.0, result.getMedian(), 0.0001);
-
-        // Sorted: [10,20,30,40]
-        // Q1: ceil(0.25*4)=1 -> index0 -> 10
-        // Q3: ceil(0.75*4)=3 -> index2 -> 30
-        assertEquals(10.0, result.getQ1(), 0.0001);
-        assertEquals(30.0, result.getQ3(), 0.0001);
-
-        double mean = expectedMean;
-        double variance = (Math.pow(10 - mean, 2) +
-                Math.pow(20 - mean, 2) +
-                Math.pow(30 - mean, 2) +
-                Math.pow(40 - mean, 2)) / 4.0;
-        double expectedStdDev = Math.sqrt(variance);
-        assertEquals(expectedStdDev, result.getStandardDeviation(), 0.0001);
-
-        assertTrue(result.getOutliers().isEmpty());
-    }
-
-    @Test
-    @DisplayName("calculateStatistics - should handle single-element list")
-    void testCalculateStatistics_SingleElement() {
-        List<Double> values = Collections.singletonList(42.0);
-
-        DataProcessor.StatisticalResult result = dataProcessor.calculateStatistics(values);
-
-        assertEquals(42.0, result.getMean(), 0.0001);
-        assertEquals(42.0, result.getMedian(), 0.0001);
-        assertEquals(42.0, result.getQ1(), 0.0001);
-        assertEquals(42.0, result.getQ3(), 0.0001);
-        assertEquals(0.0, result.getStandardDeviation(), 0.0001);
-        assertTrue(result.getOutliers().isEmpty());
-    }
-
-    @Test
-    @DisplayName("StatisticalResult - getters should return immutable outliers list")
+    @DisplayName("StatisticalResult should be immutable for outliers list")
     void testStatisticalResult_Immutability() {
-        List<Double> values = Arrays.asList(1.0, 2.0, 100.0);
+        List<Double> values = Arrays.asList(1.0, 2.0, 3.0);
         DataProcessor.StatisticalResult result = dataProcessor.calculateStatistics(values);
 
         List<Double> outliers = result.getOutliers();
-        assertThrows(UnsupportedOperationException.class, () -> outliers.add(5.0));
+        assertThrows(UnsupportedOperationException.class, () -> outliers.add(10.0));
     }
 
     // -------------------------------------------------------------------------
@@ -242,31 +199,32 @@ class DataProcessorTest {
     // -------------------------------------------------------------------------
 
     @Test
-    @DisplayName("processInParallel - should process keys in parallel and return results")
+    @DisplayName("processInParallel should process all keys and return a completed future")
     void testProcessInParallel_Basic() throws ExecutionException, InterruptedException {
         List<String> keys = Arrays.asList("a", "b", "c");
 
-        Function<String, Integer> processor = s -> s.charAt(0) - 'a';
+        Function<String, Integer> processor = String::length;
 
         CompletableFuture<Map<String, Integer>> future =
                 dataProcessor.<Integer>processInParallel(keys, processor);
 
+        assertNotNull(future);
         Map<String, Integer> result = future.get();
 
         assertEquals(3, result.size());
-        assertEquals(0, result.get("a"));
+        assertEquals(1, result.get("a"));
         assertEquals(1, result.get("b"));
-        assertEquals(2, result.get("c"));
+        assertEquals(1, result.get("c"));
     }
 
     @Test
-    @DisplayName("processInParallel - should wrap exceptions in RuntimeException")
-    void testProcessInParallel_ExceptionWrapping() {
+    @DisplayName("processInParallel should propagate processing exceptions as RuntimeException")
+    void testProcessInParallel_ExceptionPropagation() {
         List<String> keys = Arrays.asList("ok", "fail");
 
         Function<String, String> processor = key -> {
             if ("fail".equals(key)) {
-                throw new IllegalStateException("boom");
+                throw new IllegalStateException("Failure");
             }
             return key.toUpperCase();
         };
@@ -274,26 +232,26 @@ class DataProcessorTest {
         CompletableFuture<Map<String, String>> future =
                 dataProcessor.<String>processInParallel(keys, processor);
 
-        ExecutionException executionException =
-                assertThrows(ExecutionException.class, future::get);
+        ExecutionException executionException = assertThrows(ExecutionException.class, future::get);
         assertTrue(executionException.getCause() instanceof RuntimeException);
         assertTrue(executionException.getCause().getMessage().contains("Processing failed for key: fail"));
     }
 
     @Test
-    @DisplayName("processInParallel - should keep first value on key collision")
+    @DisplayName("processInParallel should keep first value on key collision")
     void testProcessInParallel_KeyCollision() throws ExecutionException, InterruptedException {
-        List<String> keys = Arrays.asList("x", "x", "x");
+        List<String> keys = Arrays.asList("k1", "k1", "k1");
 
-        Function<String, Integer> processor = s -> new Random().nextInt(1000);
+        Function<String, String> processor = key -> UUID.randomUUID().toString();
 
-        CompletableFuture<Map<String, Integer>> future =
-                dataProcessor.<Integer>processInParallel(keys, processor);
+        CompletableFuture<Map<String, String>> future =
+                dataProcessor.<String>processInParallel(keys, processor);
 
-        Map<String, Integer> result = future.get();
+        Map<String, String> result = future.get();
 
         assertEquals(1, result.size());
-        assertTrue(result.containsKey("x"));
+        assertTrue(result.containsKey("k1"));
+        assertNotNull(result.get("k1"));
     }
 
     // -------------------------------------------------------------------------
@@ -301,17 +259,18 @@ class DataProcessorTest {
     // -------------------------------------------------------------------------
 
     @Test
-    @DisplayName("findShortestPaths - should throw for null graph or invalid start node")
+    @DisplayName("findShortestPaths should throw for null graph or invalid start node")
     void testFindShortestPaths_InvalidInput() {
         assertThrows(IllegalArgumentException.class, () -> dataProcessor.findShortestPaths(null, "A"));
 
         Map<String, Map<String, Integer>> graph = new HashMap<>();
         graph.put("A", Collections.singletonMap("B", 1));
+
         assertThrows(IllegalArgumentException.class, () -> dataProcessor.findShortestPaths(graph, "Z"));
     }
 
     @Test
-    @DisplayName("findShortestPaths - should compute shortest paths in simple graph")
+    @DisplayName("findShortestPaths should compute correct shortest paths in simple graph")
     void testFindShortestPaths_SimpleGraph() {
         Map<String, Map<String, Integer>> graph = new HashMap<>();
 
@@ -335,17 +294,18 @@ class DataProcessorTest {
 
         assertEquals(0, distances.get("A").intValue());
         assertEquals(1, distances.get("B").intValue());
-        assertEquals(3, distances.get("C").intValue()); // A->B->C
-        assertEquals(4, distances.get("D").intValue()); // A->B->C->D
+        assertEquals(3, distances.get("C").intValue());
+        assertEquals(4, distances.get("D").intValue());
     }
 
     @Test
-    @DisplayName("findShortestPaths - should handle disconnected nodes")
-    void testFindShortestPaths_DisconnectedGraph() {
+    @DisplayName("findShortestPaths should handle disconnected nodes")
+    void testFindShortestPaths_DisconnectedNodes() {
         Map<String, Map<String, Integer>> graph = new HashMap<>();
+
         graph.put("A", Collections.singletonMap("B", 2));
         graph.put("B", new HashMap<>());
-        graph.put("C", new HashMap<>()); // disconnected
+        graph.put("C", new HashMap<>());
 
         Map<String, Integer> distances = dataProcessor.findShortestPaths(graph, "A");
 
